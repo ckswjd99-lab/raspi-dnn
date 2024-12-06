@@ -24,7 +24,7 @@
 #define MODEL_PATH MODEL_SQUEEZE
 #define IMAGE_PATH "./data/european-bee-eater-2115564_1920.jpg"
 #define LABEL_PATH "./data/synset.txt"
-#define NUM_TESTS  40
+#define NUM_TESTS 10
 
 template <typename T>
 T vectorProduct(const std::vector<T>& v)
@@ -215,6 +215,7 @@ struct ThreadData {
     const std::vector<Ort::Value>* inputTensors;
     const std::vector<const char*>* outputNames;
     std::vector<Ort::Value>* outputTensors;
+    std::chrono::steady_clock::time_point end;
 };
 
 void* runInferenceThread(void* arg)
@@ -225,7 +226,14 @@ void* runInferenceThread(void* arg)
         data->inputNames->data(), data->inputTensors->data(), 1, 
         data->outputNames->data(), data->outputTensors->data(), 1
     );
+    data->end = std::chrono::steady_clock::now();
     return nullptr;
+}
+
+void prepareInputTensor(const std::string& imageFilepath, const std::vector<int64_t>& inputDims, std::vector<float>& inputTensorValues, int64_t batchSize, size_t inputTensorSize)
+{
+    cv::Mat preprocessedImage = preprocessImage(imageFilepath, inputDims);
+    copyImageToTensor(preprocessedImage, inputTensorValues, batchSize, inputTensorSize);
 }
 
 int main(int argc, char* argv[])
@@ -237,6 +245,7 @@ int main(int argc, char* argv[])
     int numIntraThreads = 1;
     int numInterThreads = 1;
     int numMultiThreads = 1;
+    int numTests = NUM_TESTS;
 
     const int64_t batchSize = 1;
 
@@ -245,15 +254,17 @@ int main(int argc, char* argv[])
     if (argc > 3) numIntraThreads = std::stoi(argv[3]);
     if (argc > 4) numInterThreads = std::stoi(argv[4]);
     if (argc > 5) numMultiThreads = std::stoi(argv[5]);
-    if (argc > 6) {
+    if (argc > 6) numTests = std::stoi(argv[6]);
+    if (argc > 7) {
         printf("Usage: %s [model] [image] [num_intra_threads] [num_inter_threads]\n", argv[0]);
         return 1;
     }
 
+    printf("<Configuration>\n");
     std::cout << "Model: " << modelFilepath << std::endl;
     std::cout << "Image: " << imageFilepath << std::endl;
-    printf("#Thread (intra, inter): (%d, %d)\n", numIntraThreads, numInterThreads);
-    printf("#Thread (multi): %d\n", numMultiThreads);
+    printf("Num of Threads (intra, inter): (%d, %d)\n", numIntraThreads, numInterThreads);
+    printf("Num of Threads (multi): %d\n", numMultiThreads);
 
     std::vector<std::string> labels{readLabels(labelFilepath)};
 
@@ -291,11 +302,9 @@ int main(int argc, char* argv[])
         outputDims.at(0) = batchSize;
     }
 
-    cv::Mat preprocessedImage = preprocessImage(imageFilepath, inputDims);
-
     size_t inputTensorSize = vectorProduct(inputDims);
     std::vector<float> inputTensorValues(inputTensorSize);
-    copyImageToTensor(preprocessedImage, inputTensorValues, batchSize, inputTensorSize);
+    prepareInputTensor(imageFilepath, inputDims, inputTensorValues, batchSize, inputTensorSize);
 
     size_t outputTensorSize = vectorProduct(outputDims);
     assert(("Output tensor size should equal to the label set size.", labels.size() * batchSize == outputTensorSize));
@@ -322,6 +331,8 @@ int main(int argc, char* argv[])
         outputNames.push_back(outputNodeNameAllocatedStrings.back().get());
     }
 
+    std::cout << std::endl;
+    std::cout << "<Model Information>" << std::endl;
     std::cout << "Number of Input Nodes: " << numInputNodes << std::endl;
     std::cout << "Number of Output Nodes: " << numOutputNodes << std::endl;
     std::cout << "Input Name: " << inputNames[0] << std::endl;
@@ -335,24 +346,34 @@ int main(int argc, char* argv[])
     inputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, inputTensorValues.data(), inputTensorSize, inputDims.data(), inputDims.size()));
     outputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, outputTensorValues.data(), outputTensorSize, outputDims.data(), outputDims.size()));
 
-    pthread_t threads[numMultiThreads];
-    ThreadData threadData[numMultiThreads];
-    for (int i = 0; i < numMultiThreads; i++)
-    {
-        threadData[i] = {&sessionList.at(i), &inputNames, &inputTensors, &outputNames, &outputTensors};
-        pthread_create(&threads[i], nullptr, runInferenceThread, &threadData[i]);
-    }
-    for (int i = 0; i < numMultiThreads; i++)
-    {
-        pthread_join(threads[i], nullptr);
-    }
-
-    printInferenceResults(outputTensorValues, labels, batchSize);
-
-    int numTests{NUM_TESTS};
+    
+    // Single Thread Inference
+    printf("\n");
+    printf("<TEST: Single DNN>\n");
+    
     auto begin = std::chrono::steady_clock::now();
     for (int i = 0; i < numTests; i++)
     {
+        session.Run(
+            Ort::RunOptions{nullptr}, 
+            inputNames.data(), inputTensors.data(), 1, 
+            outputNames.data(), outputTensors.data(), 1
+        );
+    }
+    auto end = std::chrono::steady_clock::now();
+
+    printInferenceResults(outputTensorValues, labels, batchSize);
+    std::cout << "Inference Latency: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() / static_cast<float>(numTests) << " ms" << std::endl;
+
+    // Multi Thread Inference
+    printf("\n");
+    printf("<TEST: Multi DNN>\n");
+
+    for (int i = 0; i < numTests; i++)
+    {
+        printf("Test %d\n", i);
+
+        auto begin = std::chrono::steady_clock::now();
         pthread_t threads[numMultiThreads];
         ThreadData threadData[numMultiThreads];
         for (int i = 0; i < numMultiThreads; i++)
@@ -364,7 +385,13 @@ int main(int argc, char* argv[])
         {
             pthread_join(threads[i], nullptr);
         }
+        auto end = std::chrono::steady_clock::now();
+        std::cout << "Total Inference Latency: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() << " ms" << std::endl;
+
+        for (int i = 0; i < numMultiThreads; i++)
+        {
+            std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(threadData[i].end - begin).count() << " / ";
+        }
+        std::cout << std::endl;
     }
-    auto end = std::chrono::steady_clock::now();
-    std::cout << "Average Inference Latency: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count() / static_cast<float>(numTests) << " ms" << std::endl;
 }
