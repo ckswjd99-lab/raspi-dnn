@@ -3,9 +3,9 @@
 // https://github.com/microsoft/onnxruntime/blob/v1.8.2/include/onnxruntime/core/session/onnxruntime_cxx_api.h
 #include <onnxruntime/onnxruntime_cxx_api.h>
 
-// #include <opencv2/dnn/dnn.hpp>
-// #include <opencv2/imgcodecs.hpp>
-// #include <opencv2/imgproc.hpp>
+#include <opencv2/dnn/dnn.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 
 #include <chrono>
 #include <cmath>
@@ -25,10 +25,6 @@
 #define IMAGE_PATH "./data/european-bee-eater-2115564_1920.jpg"
 #define LABEL_PATH "./data/synset.txt"
 #define NUM_TESTS  10
-
-#define NUM_INTRA_THREADS 1
-#define NUM_INTER_THREADS 1
-
 
 template <typename T>
 T vectorProduct(const std::vector<T>& v)
@@ -144,59 +140,36 @@ std::vector<std::string> readLabels(std::string& labelFilepath)
 
 int main(int argc, char* argv[])
 {
-    const int64_t batchSize = 1;
-    bool useCUDA{true};
-    const char* useCUDAFlag = "--use_cuda";
-    const char* useCPUFlag = "--use_cpu";
-    if (argc == 1)
-    {
-        useCUDA = false;
-    }
-    else if ((argc == 2) && (strcmp(argv[1], useCUDAFlag) == 0))
-    {
-        useCUDA = true;
-    }
-    else if ((argc == 2) && (strcmp(argv[1], useCPUFlag) == 0))
-    {
-        useCUDA = false;
-    }
-    else if ((argc == 2) && (strcmp(argv[1], useCUDAFlag) != 0))
-    {
-        useCUDA = false;
-    }
-    else
-    {
-        throw std::runtime_error{"Too many arguments."};
-    }
-
-    if (useCUDA)
-    {
-        std::cout << "Inference Execution Provider: CUDA" << std::endl;
-    }
-    else
-    {
-        std::cout << "Inference Execution Provider: CPU" << std::endl;
-    }
-
     std::string instanceName{"image-classification-inference"};
     std::string modelFilepath{MODEL_PATH};
     std::string imageFilepath{IMAGE_PATH};
     std::string labelFilepath{LABEL_PATH};
+    int numIntraThreads = 1;
+    int numInterThreads = 1;
+
+    const int64_t batchSize = 1;
+
+    if (argc > 1) modelFilepath = argv[1];
+    if (argc > 2) imageFilepath = argv[2];
+    if (argc > 3) numIntraThreads = std::stoi(argv[3]);
+    if (argc > 4) numInterThreads = std::stoi(argv[4]);
+    if (argc > 5) {
+        printf("Usage: %s [model] [image] [num_intra_threads] [num_inter_threads]\n", argv[0]);
+        return 1;
+    }
+
+    std::cout << "Model: " << modelFilepath << std::endl;
+    std::cout << "Image: " << imageFilepath << std::endl;
+    printf("#Thread (intra, inter): (%d, %d)\n", numIntraThreads, numInterThreads);
+
 
     std::vector<std::string> labels{readLabels(labelFilepath)};
 
     Ort::Env env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING,
                  instanceName.c_str());
     Ort::SessionOptions sessionOptions;
-    sessionOptions.SetIntraOpNumThreads(NUM_INTRA_THREADS);
-    sessionOptions.SetInterOpNumThreads(NUM_INTER_THREADS);
-    if (useCUDA)
-    {
-        // Using CUDA backend
-        // https://github.com/microsoft/onnxruntime/blob/v1.8.2/include/onnxruntime/core/session/onnxruntime_cxx_api.h#L329
-        OrtCUDAProviderOptions cuda_options{};
-        sessionOptions.AppendExecutionProvider_CUDA(cuda_options);
-    }
+    sessionOptions.SetIntraOpNumThreads(numIntraThreads);
+    sessionOptions.SetInterOpNumThreads(numInterThreads);
 
     // Sets graph optimization level
     // Available levels are
@@ -245,36 +218,33 @@ int main(int argc, char* argv[])
         outputDims.at(0) = batchSize;
     }
 
-    // cv::Mat imageBGR = cv::imread(imageFilepath, cv::ImreadModes::IMREAD_COLOR);
-    // cv::Mat resizedImageBGR, resizedImageRGB, resizedImage, preprocessedImage;
-    // cv::resize(imageBGR, resizedImageBGR,
-    //            cv::Size(inputDims.at(3), inputDims.at(2)),
-    //            cv::InterpolationFlags::INTER_CUBIC);
-    // cv::cvtColor(resizedImageBGR, resizedImageRGB,
-    //              cv::ColorConversionCodes::COLOR_BGR2RGB);
-    // resizedImageRGB.convertTo(resizedImage, CV_32F, 1.0 / 255);
+    cv::Mat imageBGR = cv::imread(imageFilepath, cv::ImreadModes::IMREAD_COLOR);
+    cv::Mat resizedImageBGR, resizedImageRGB, resizedImage, preprocessedImage;
+    cv::resize(imageBGR, resizedImageBGR, cv::Size(inputDims.at(3), inputDims.at(2)), cv::InterpolationFlags::INTER_CUBIC);
+    cv::cvtColor(resizedImageBGR, resizedImageRGB, cv::ColorConversionCodes::COLOR_BGR2RGB);
+    resizedImageRGB.convertTo(resizedImage, CV_32F, 1.0 / 255);
 
-    // cv::Mat channels[3];
-    // cv::split(resizedImage, channels);
-    // // Normalization per channel
-    // // Normalization parameters obtained from
-    // // https://github.com/onnx/models/tree/master/vision/classification/squeezenet
-    // channels[0] = (channels[0] - 0.485) / 0.229;
-    // channels[1] = (channels[1] - 0.456) / 0.224;
-    // channels[2] = (channels[2] - 0.406) / 0.225;
-    // cv::merge(channels, 3, resizedImage);
-    // // HWC to CHW
-    // cv::dnn::blobFromImage(resizedImage, preprocessedImage);
+    cv::Mat channels[3];
+    cv::split(resizedImage, channels);
+    // Normalization per channel
+    // Normalization parameters obtained from
+    // https://github.com/onnx/models/tree/master/vision/classification/squeezenet
+    channels[0] = (channels[0] - 0.485) / 0.229;
+    channels[1] = (channels[1] - 0.456) / 0.224;
+    channels[2] = (channels[2] - 0.406) / 0.225;
+    cv::merge(channels, 3, resizedImage);
+    // HWC to CHW
+    cv::dnn::blobFromImage(resizedImage, preprocessedImage);
 
     size_t inputTensorSize = vectorProduct(inputDims);
     std::vector<float> inputTensorValues(inputTensorSize);
     // Make copies of the same image input.
-    // for (int64_t i = 0; i < batchSize; ++i)
-    // {
-    //     std::copy(preprocessedImage.begin<float>(),
-    //               preprocessedImage.end<float>(),
-    //               inputTensorValues.begin() + i * inputTensorSize / batchSize);
-    // }
+    for (int64_t i = 0; i < batchSize; ++i)
+    {
+        std::copy(preprocessedImage.begin<float>(),
+                  preprocessedImage.end<float>(),
+                  inputTensorValues.begin() + i * inputTensorSize / batchSize);
+    }
 
     size_t outputTensorSize = vectorProduct(outputDims);
     assert(("Output tensor size should equal to the label set size.",

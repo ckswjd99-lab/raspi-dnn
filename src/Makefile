@@ -1,7 +1,9 @@
-
+CXX=g++
+LDFLAGS=-lonnxruntime `ls /usr/local/lib/*opencv*`
+OUTPUT=imnet_classifier.out
 
 all:
-	g++ imnet_classifier.cpp -lonnxruntime -o imnet_classifier.out
+	$(CXX) imnet_classifier.cpp $(LDFLAGS) -o $(OUTPUT)
 
 clean:
 	rm -f imnet_classifier.out
