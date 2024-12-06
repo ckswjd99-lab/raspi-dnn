@@ -1,5 +1,5 @@
 CXX=g++
-LDFLAGS=-lonnxruntime `ls /usr/local/lib/*opencv*`
+LDFLAGS=-lonnxruntime `ls /usr/local/lib/*opencv*` -lpthread
 OUTPUT=imnet_classifier.out
 
 all:
