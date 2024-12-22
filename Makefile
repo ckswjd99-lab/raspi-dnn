@@ -10,7 +10,7 @@ $(shell mkdir -p $(OBJDIR))
 
 DEPS = $(wildcard include/*.hpp)
 
-TARGET=imnet_classifier.out
+TARGET=main.out
 
 ifeq ($(OS),Darwin)
 	CXX=clang++

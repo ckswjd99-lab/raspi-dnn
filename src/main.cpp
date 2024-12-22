@@ -1,7 +1,4 @@
-// https://github.com/microsoft/onnxruntime/blob/v1.8.2/csharp/test/Microsoft.ML.OnnxRuntime.EndToEndTests.Capi/CXX_Api_Sample.cpp
-// https://github.com/microsoft/onnxruntime/blob/v1.8.2/include/onnxruntime/core/session/onnxruntime_cxx_api.h
 #include <onnxruntime/onnxruntime_cxx_api.h>
-#include <pthread.h>
 
 #include <opencv2/dnn/dnn.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -17,10 +14,9 @@
 #include <string>
 #include <vector>
 #include <cassert>
+#include <pthread.h>
 
-#include "utils.hpp"
-#include "proc_input.hpp"
-#include "proc_infer.hpp"
+#include "infer_session.hpp"
 
 #define MODEL_RESNET18 "./data/resnet18-v1-7.onnx"   // 181 - 96 - 68 - 51 - 46 - 42 - 35 - 40 ms
 #define MODEL_SQUEEZE  "./data/squeezenet1.1-7.onnx" // 36 - 20 - 15 - 12 - 11 - 9 - 9 - 11 ms

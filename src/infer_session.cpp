@@ -1,6 +1,6 @@
-#include "proc_infer.hpp"
+#include "infer_session.hpp"
 #include "utils.hpp"
-#include "proc_input.hpp"
+#include "input.hpp"
 
 #define PREFIX_THREAD_SUB "\033[1;33m[ST]\033[0m "
 #define PREFIX_THREAD_MAIN "\033[1;32m[MT]\033[0m "
