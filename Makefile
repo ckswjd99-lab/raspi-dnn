@@ -1,6 +1,7 @@
 OS=$(shell uname -s)
-INCLUDES=$(wildcard include/*.hpp)
+DEBUG=0
 
+INCLUDES=$(wildcard include/*.hpp)
 SRC=$(wildcard src/*.cpp)
 
 OBJDIR=./obj/
@@ -22,6 +23,12 @@ else
 	LDFLAGS+=-lonnxruntime -lpthread
 	LDFLAGS+=-lopencv_core -lopencv_imgproc -lopencv_imgcodecs -lopencv_dnn
 	COMMON+=-I/usr/local/include
+endif
+
+ifeq ($(DEBUG),1)
+	COMMON+=-g -DDEBUG -DDEBUG_THREAD
+else
+	COMMON+=-O3
 endif
 
 

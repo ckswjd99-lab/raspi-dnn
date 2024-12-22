@@ -74,3 +74,36 @@ std::vector<std::string> readLabels(const std::string& labelFilepath)
     }
     return labels;
 }
+
+void printInferenceResults(const std::vector<float>& outputTensorValues, const std::vector<std::string>& labels, int batchSize)
+{
+    std::vector<int> predIds(batchSize, 0);
+    std::vector<std::string> predLabels(batchSize);
+    std::vector<float> confidences(batchSize, 0.0f);
+    for (int64_t b = 0; b < batchSize; ++b)
+    {
+        float activation = 0;
+        float maxActivation = std::numeric_limits<float>::lowest();
+        float expSum = 0;
+        for (int i = 0; i < labels.size(); i++)
+        {
+            activation = outputTensorValues.at(i + b * labels.size());
+            expSum += std::exp(activation);
+            if (activation > maxActivation)
+            {
+                predIds.at(b) = i;
+                maxActivation = activation;
+            }
+        }
+        predLabels.at(b) = labels.at(predIds.at(b));
+        confidences.at(b) = std::exp(maxActivation) / expSum;
+    }
+    for (int64_t b = 0; b < batchSize; ++b)
+    {
+        assert(("Output predictions should all be identical.", predIds.at(b) == predIds.at(0)));
+    }
+
+    std::cout << "Predicted Label ID: " << predIds.at(0) << std::endl;
+    std::cout << "Predicted Label: " << predLabels.at(0) << std::endl;
+    std::cout << "Uncalibrated Confidence: " << confidences.at(0) << std::endl;
+}
