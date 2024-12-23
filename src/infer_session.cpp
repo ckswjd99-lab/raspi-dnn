@@ -13,7 +13,7 @@
 #endif
 
 template <typename T>
-static T vectorProduct(const std::vector<T>& v)
+static T vector_product(const std::vector<T>& v)
 {
     return accumulate(v.begin(), v.end(), 1, std::multiplies<T>());
 }
@@ -34,28 +34,25 @@ static std::ostream& operator<<(std::ostream& os, const std::vector<T>& v)
     return os;
 }
 
-Ort::Session *createSession(const std::string& modelFilepath, const std::string& instanceName, int numIntraThreads, int numInterThreads)
+Ort::Session *create_session(const std::string& model_filepath, const std::string& instance_name, int num_intra_threads, int num_inter_threads)
 {
-    Ort::Env env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING, instanceName.c_str());
-    Ort::SessionOptions sessionOptions;
-    sessionOptions.SetIntraOpNumThreads(numIntraThreads);
-    sessionOptions.SetInterOpNumThreads(numInterThreads);
-    sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+    Ort::Env env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING, instance_name.c_str());
+    Ort::SessionOptions session_options;
+    session_options.SetIntraOpNumThreads(num_intra_threads);
+    session_options.SetInterOpNumThreads(num_inter_threads);
+    session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
 
-    return new Ort::Session(env, modelFilepath.c_str(), sessionOptions);
+    return new Ort::Session(env, model_filepath.c_str(), session_options);
 }
 
 InferenceSession::InferenceSession(
-    std::string instanceName,
+    std::string instance_name,
     const std::string& model_path, const std::string& label_path,
     int num_intra_threads, int num_inter_threads
-) : instanceName(instanceName), model_path(model_path), label_path(label_path), num_intra_threads(num_intra_threads), num_inter_threads(num_inter_threads)
+) : instance_name(instance_name), model_path(model_path), label_path(label_path), num_intra_threads(num_intra_threads), num_inter_threads(num_inter_threads)
 {
-    labels = readLabels(label_path);
-    session = createSession(model_path, instanceName, num_intra_threads, num_inter_threads);
-
-    pthread_mutex_init(&mutex, nullptr);
-    pthread_cond_init(&cond, nullptr);
+    labels = read_labels(label_path);
+    session = create_session(model_path, instance_name, num_intra_threads, num_inter_threads);
 }
 
 InferenceSession::~InferenceSession() {
@@ -64,10 +61,10 @@ InferenceSession::~InferenceSession() {
 
 void InferenceSession::print_info() {
     printf("<Model Information>\n");
-    printf("Instance Name: %s\n", instanceName.c_str());
-    printf("Model Path: %s\n", model_path.c_str());
-    printf("Label Path: %s\n", label_path.c_str());
-    printf("Number of (Intra, Inter) Threads: (%d, %d)\n", num_intra_threads, num_inter_threads);
+    printf(" - Instance Name: %s\n", instance_name.c_str());
+    printf(" - Model Path: %s\n", model_path.c_str());
+    printf(" - Label Path: %s\n", label_path.c_str());
+    printf(" - Number of (Intra, Inter) Threads: (%d, %d)\n", num_intra_threads, num_inter_threads);
     printf("\n");
 }
 
@@ -75,157 +72,88 @@ void InferenceSession::load_input(const std::string& image_path, int batch_size)
 {
     Ort::AllocatorWithDefaultOptions allocator;
 
-    size_t numInputNodes = session->GetInputCount();
-    size_t numOutputNodes = session->GetOutputCount();
+    size_t num_input_nodes = session->GetInputCount();
+    size_t num_output_nodes = session->GetOutputCount();
 
-    Ort::TypeInfo inputTypeInfo = session->GetInputTypeInfo(0);
-    auto inputTensorInfo = inputTypeInfo.GetTensorTypeAndShapeInfo();
-    ONNXTensorElementDataType inputType = inputTensorInfo.GetElementType();
-    std::vector<int64_t> inputDims = inputTensorInfo.GetShape();
-    if (inputDims.at(0) == -1)
+    Ort::TypeInfo input_type_info = session->GetInputTypeInfo(0);
+    auto input_tensor_info = input_type_info.GetTensorTypeAndShapeInfo();
+    ONNXTensorElementDataType input_type = input_tensor_info.GetElementType();
+    std::vector<int64_t> input_dims = input_tensor_info.GetShape();
+    if (input_dims.at(0) == -1)
     {
-        std::cout << "Got dynamic batch size. Setting input batch size to " << batch_size << "." << std::endl;
-        inputDims.at(0) = batch_size;
+        input_dims.at(0) = batch_size;
     }
 
-    Ort::TypeInfo outputTypeInfo = session->GetOutputTypeInfo(0);
-    auto outputTensorInfo = outputTypeInfo.GetTensorTypeAndShapeInfo();
-    ONNXTensorElementDataType outputType = outputTensorInfo.GetElementType();
-    std::vector<int64_t> outputDims = outputTensorInfo.GetShape();
+    Ort::TypeInfo output_type_info = session->GetOutputTypeInfo(0);
+    auto output_tensor_info = output_type_info.GetTensorTypeAndShapeInfo();
+    ONNXTensorElementDataType outputType = output_tensor_info.GetElementType();
+    std::vector<int64_t> outputDims = output_tensor_info.GetShape();
     if (outputDims.at(0) == -1)
     {
-        std::cout << "Got dynamic batch size. Setting output batch size to " << batch_size << "." << std::endl;
         outputDims.at(0) = batch_size;
     }
 
-    size_t inputTensorSize = vectorProduct(inputDims);
-    inputTensorValues.resize(inputTensorSize);
-    prepareInputTensor(image_path, inputDims, inputTensorValues, batch_size, inputTensorSize);
+    size_t inputTensorSize = vector_product(input_dims);
+    input_tensor_values.resize(inputTensorSize);
+    prepareInputTensor(image_path, input_dims, input_tensor_values, batch_size, inputTensorSize);
 
-    size_t outputTensorSize = vectorProduct(outputDims);
+    size_t outputTensorSize = vector_product(outputDims);
     assert(("Output tensor size should equal to the label set size.", labels.size() * batch_size == outputTensorSize));
-    outputTensorValues.resize(outputTensorSize);
+    output_tensor_values.resize(outputTensorSize);
 
     auto inputNodesNum = session->GetInputCount();
     for (int i = 0; i < inputNodesNum; i++) {
         auto input_name = session->GetInputNameAllocated(i, allocator);
-        inputNodeNameAllocatedStrings.push_back(std::move(input_name));
-        inputNames.push_back(inputNodeNameAllocatedStrings.back().get());
+        input_node_name_allocated_strings.push_back(std::move(input_name));
+        input_names.push_back(input_node_name_allocated_strings.back().get());
     }
 
     auto outputNodesNum = session->GetOutputCount();
     for (int i = 0; i < outputNodesNum; i++) {
         auto output_name = session->GetOutputNameAllocated(i, allocator);
-        outputNodeNameAllocatedStrings.push_back(std::move(output_name));
-        outputNames.push_back(outputNodeNameAllocatedStrings.back().get());
+        output_node_name_allocated_strings.push_back(std::move(output_name));
+        output_names.push_back(output_node_name_allocated_strings.back().get());
     }
 
     Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtAllocatorType::OrtArenaAllocator, OrtMemType::OrtMemTypeDefault);
-    inputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, inputTensorValues.data(), inputTensorSize, inputDims.data(), inputDims.size()));
-    outputTensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, outputTensorValues.data(), outputTensorSize, outputDims.data(), outputDims.size()));
+    input_tensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, input_tensor_values.data(), inputTensorSize, input_dims.data(), input_dims.size()));
+    output_tensors.push_back(Ort::Value::CreateTensor<float>(memoryInfo, output_tensor_values.data(), outputTensorSize, outputDims.data(), outputDims.size()));
 
 }
 
 void InferenceSession::print_results()
 {
-    outputTensorValues.assign(outputTensors.at(0).GetTensorMutableData<float>(), outputTensors.at(0).GetTensorMutableData<float>() + outputTensors.at(0).GetTensorTypeAndShapeInfo().GetElementCount());
-    printInferenceResults(outputTensorValues, labels, 1);
+    output_tensor_values.assign(output_tensors.at(0).GetTensorMutableData<float>(), output_tensors.at(0).GetTensorMutableData<float>() + output_tensors.at(0).GetTensorTypeAndShapeInfo().GetElementCount());
+    print_inference_results(output_tensor_values, labels, 1);
 }
 
-void InferenceSession::run()
+void InferenceSession::infer_sync()
 {
-    pthread_mutex_lock(&mutex);
-    run_flag = 1;
-    pthread_mutex_unlock(&mutex);
-
-    pthread_create(&thread, nullptr, (void* (*)(void*))&InferenceSession::thread_func, this);
+    session->Run(
+        Ort::RunOptions{nullptr}, 
+        input_names.data(), input_tensors.data(), 1, 
+        output_names.data(), output_tensors.data(), 1
+    );
 }
 
-void InferenceSession::wait_load()
+void InferenceSession::infer_async()
 {
-    while (true) {
-        pthread_mutex_lock(&mutex);
-        int flag = load_flag;
-        pthread_mutex_unlock(&mutex);
-
-        if (flag == 1) break;
+    if (flag_infer == 1) {
+        PRINT_THREAD_MAIN("infer_async() called while infer_async() is already running.");
+        return;
     }
 
-    PRINT_THREAD_MAIN("Model loaded");
-}
-
-void InferenceSession::infer()
-{
-    PRINT_THREAD_MAIN("Signaling inference");
-
-    pthread_mutex_lock(&mutex);
-    infer_flag = 1;
-    pthread_cond_signal(&cond);
-    pthread_mutex_unlock(&mutex);
+    flag_infer = 1;
+    pthread_create(&thread, nullptr, (void* (*)(void*))&InferenceSession::infer_sync, this);
 }
 
 void InferenceSession::wait_infer()
 {
-    while (true) {
-        pthread_mutex_lock(&mutex);
-        int flag = infer_flag;
-        pthread_mutex_unlock(&mutex);
-
-        if (flag == 0) break;
+    if (flag_infer == 0) {
+        PRINT_THREAD_MAIN("wait_infer() called while infer_async() is not running.");
+        return;
     }
-
-    PRINT_THREAD_MAIN("Inference done");
-}
-
-void InferenceSession::stop()
-{
-    PRINT_THREAD_MAIN("Signaling stop");
-
-    pthread_mutex_lock(&mutex);
-    run_flag = 0;
-    pthread_cond_signal(&cond);
-    pthread_mutex_unlock(&mutex);
 
     pthread_join(thread, nullptr);
-    pthread_mutex_destroy(&mutex);
-    pthread_cond_destroy(&cond);
+    flag_infer = 0;
 }
-
-void *InferenceSession::thread_func()
-{
-    PRINT_THREAD_SUB("Thread func started");
-    load_flag = 1;
-
-    while (true)
-    {
-        PRINT_THREAD_SUB("Thread func waiting");
-
-        pthread_mutex_lock(&mutex);
-        infer_flag = 0;
-        pthread_cond_wait(&cond, &mutex);
-        pthread_mutex_unlock(&mutex);
-        
-        PRINT_THREAD_SUB("Thread func signaled");
-
-        if (run_flag == 0) break;
-
-        printf("<Running inference>\n");
-
-        auto begin = std::chrono::steady_clock::now();
-        session->Run(
-            Ort::RunOptions{nullptr}, 
-            inputNames.data(), inputTensors.data(), 1, 
-            outputNames.data(), outputTensors.data(), 1
-        );
-        auto end = std::chrono::steady_clock::now();
-
-        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin);
-        
-        std::cout << "Inference Time: " << elapsed_ms.count() << " ms" << std::endl;
-        print_results();
-
-    }
-
-    return nullptr;
-}
-

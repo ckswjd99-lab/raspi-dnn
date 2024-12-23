@@ -1,5 +1,5 @@
 OS=$(shell uname -s)
-DEBUG=0
+DEBUG=1
 
 INCLUDES=$(wildcard include/*.hpp)
 SRC=$(wildcard src/*.cpp)
@@ -15,15 +15,14 @@ TARGET=main.out
 ifeq ($(OS),Darwin)
 	CXX=clang++
 	LDFLAGS=-L/opt/homebrew/lib
-	LDFLAGS+=-lonnxruntime -lpthread -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -lopencv_dnn
 	COMMON+=-std=c++14 -I/opt/homebrew/include -I/opt/homebrew/include/opencv4
 else
 	CXX=g++
 	LDFLAGS=-L/usr/local/lib
-	LDFLAGS+=-lonnxruntime -lpthread
-	LDFLAGS+=-lopencv_core -lopencv_imgproc -lopencv_imgcodecs -lopencv_dnn
 	COMMON+=-I/usr/local/include
 endif
+LDFLAGS+=-lonnxruntime -lpthread -fopenmp
+LDFLAGS+=-lopencv_core -lopencv_imgproc -lopencv_imgcodecs -lopencv_dnn
 
 ifeq ($(DEBUG),1)
 	COMMON+=-g -DDEBUG -DDEBUG_THREAD

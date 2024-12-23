@@ -63,11 +63,11 @@ std::ostream& operator<<(std::ostream& os, const ONNXTensorElementDataType& type
     return os;
 }
 
-std::vector<std::string> readLabels(const std::string& labelFilepath)
+std::vector<std::string> read_labels(const std::string& label_filepath)
 {
     std::vector<std::string> labels;
     std::string line;
-    std::ifstream fp(labelFilepath);
+    std::ifstream fp(label_filepath);
     while (std::getline(fp, line))
     {
         labels.push_back(line);
@@ -75,35 +75,35 @@ std::vector<std::string> readLabels(const std::string& labelFilepath)
     return labels;
 }
 
-void printInferenceResults(const std::vector<float>& outputTensorValues, const std::vector<std::string>& labels, int batchSize)
+void print_inference_results(const std::vector<float>& output_tensor_values, const std::vector<std::string>& labels, int batch_size)
 {
-    std::vector<int> predIds(batchSize, 0);
-    std::vector<std::string> predLabels(batchSize);
-    std::vector<float> confidences(batchSize, 0.0f);
-    for (int64_t b = 0; b < batchSize; ++b)
+    std::vector<int> pred_ids(batch_size, 0);
+    std::vector<std::string> pred_labels(batch_size);
+    std::vector<float> confidences(batch_size, 0.0f);
+    for (int64_t b = 0; b < batch_size; ++b)
     {
         float activation = 0;
-        float maxActivation = std::numeric_limits<float>::lowest();
-        float expSum = 0;
+        float max_activation = std::numeric_limits<float>::lowest();
+        float exp_sum = 0;
         for (int i = 0; i < labels.size(); i++)
         {
-            activation = outputTensorValues.at(i + b * labels.size());
-            expSum += std::exp(activation);
-            if (activation > maxActivation)
+            activation = output_tensor_values.at(i + b * labels.size());
+            exp_sum += std::exp(activation);
+            if (activation > max_activation)
             {
-                predIds.at(b) = i;
-                maxActivation = activation;
+                pred_ids.at(b) = i;
+                max_activation = activation;
             }
         }
-        predLabels.at(b) = labels.at(predIds.at(b));
-        confidences.at(b) = std::exp(maxActivation) / expSum;
+        pred_labels.at(b) = labels.at(pred_ids.at(b));
+        confidences.at(b) = std::exp(max_activation) / exp_sum;
     }
-    for (int64_t b = 0; b < batchSize; ++b)
+    for (int64_t b = 0; b < batch_size; ++b)
     {
-        assert(("Output predictions should all be identical.", predIds.at(b) == predIds.at(0)));
+        assert(("Output predictions should all be identical.", pred_ids.at(b) == pred_ids.at(0)));
     }
 
-    std::cout << "Predicted Label ID: " << predIds.at(0) << std::endl;
-    std::cout << "Predicted Label: " << predLabels.at(0) << std::endl;
+    std::cout << "Predicted Label ID: " << pred_ids.at(0) << std::endl;
+    std::cout << "Predicted Label: " << pred_labels.at(0) << std::endl;
     std::cout << "Uncalibrated Confidence: " << confidences.at(0) << std::endl;
 }

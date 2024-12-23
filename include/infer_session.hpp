@@ -12,7 +12,7 @@
 class InferenceSession {
     public:
     InferenceSession(
-        std::string instanceName,
+        std::string instance_name,
         const std::string& model_path, const std::string& label_path,
         int num_intra_threads, int num_inter_threads
     );
@@ -23,15 +23,13 @@ class InferenceSession {
     void load_input(const std::string& image_path, int batch_size);
     void print_results();
     
-    void run();
-    void wait_load();
-    void infer();
+    void infer_sync();
+    void infer_async();
     void wait_infer();
-    void stop();
 
 
     private:
-    std::string instanceName;
+    std::string instance_name;
     std::string model_path;
     std::string label_path;
     int num_intra_threads;
@@ -39,25 +37,18 @@ class InferenceSession {
     std::vector<std::string> labels;
     
     Ort::Session* session = nullptr;
-    std::vector<const char*> inputNames;
-    std::vector<const char*> outputNames;
-    std::vector<Ort::Value> inputTensors;
-    std::vector<Ort::Value> outputTensors;
-    std::vector<float> inputTensorValues;
-    std::vector<float> outputTensorValues;
+    std::vector<const char*> input_names;
+    std::vector<const char*> output_names;
+    std::vector<Ort::Value> input_tensors;
+    std::vector<Ort::Value> output_tensors;
+    std::vector<float> input_tensor_values;
+    std::vector<float> output_tensor_values;
 
-    std::vector<Ort::AllocatedStringPtr> inputNodeNameAllocatedStrings;
-    std::vector<Ort::AllocatedStringPtr> outputNodeNameAllocatedStrings;
-
-    int run_flag = 0;
-    int load_flag = 0;
-    int infer_flag = 0;
+    std::vector<Ort::AllocatedStringPtr> input_node_name_allocated_strings;
+    std::vector<Ort::AllocatedStringPtr> output_node_name_allocated_strings;
 
     pthread_t thread;
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
 
-    void *thread_func();
-
+    int flag_infer = 0;
 
 };

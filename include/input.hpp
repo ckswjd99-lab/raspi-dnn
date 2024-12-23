@@ -11,5 +11,5 @@
 #include <opencv2/imgproc.hpp>
 
 
-cv::Mat preprocessImage(const std::string& imageFilepath, const std::vector<int64_t>& inputDims);
-void prepareInputTensor(const std::string& imageFilepath, const std::vector<int64_t>& inputDims, std::vector<float>& inputTensorValues, int64_t batchSize, size_t inputTensorSize);
+cv::Mat preprocess_image(const std::string& image_filepath, const std::vector<int64_t>& input_dims);
+void prepareInputTensor(const std::string& image_filepath, const std::vector<int64_t>& input_dims, std::vector<float>& input_tensor_values, int64_t batch_size, size_t input_tensor_size);
