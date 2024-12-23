@@ -1,16 +1,7 @@
-#include "infer_session.hpp"
-#include "utils.hpp"
+#include "session.hpp"
+#include "util.hpp"
 #include "input.hpp"
 
-#define PREFIX_THREAD_SUB "\033[1;33m[ST]\033[0m "
-#define PREFIX_THREAD_MAIN "\033[1;32m[MT]\033[0m "
-#ifdef DEBUG_THREAD
-#define PRINT_THREAD_SUB(msg) std::cout << PREFIX_THREAD_SUB << msg << std::endl
-#define PRINT_THREAD_MAIN(msg) std::cout << PREFIX_THREAD_MAIN << msg << std::endl
-#else
-#define PRINT_THREAD_SUB(msg)
-#define PRINT_THREAD_MAIN(msg)
-#endif
 
 template <typename T>
 static T vector_product(const std::vector<T>& v)
@@ -129,11 +120,45 @@ void InferenceSession::print_results()
 
 void InferenceSession::infer_sync()
 {
+    state = SESSION_STATE_INFER;
+
     session->Run(
         Ort::RunOptions{nullptr}, 
         input_names.data(), input_tensors.data(), 1, 
         output_names.data(), output_tensors.data(), 1
     );
+
+    finish_time = std::chrono::system_clock::now();
+    state = SESSION_STATE_FINISHED;
+}
+
+void *InferenceSession::infer_async_func(void* arg)
+{
+    PRINT_THREAD_SUB("Inference start: " << instance_name);
+
+    state = SESSION_STATE_INFER;
+
+    session->Run(
+        Ort::RunOptions{nullptr}, 
+        input_names.data(), input_tensors.data(), 1, 
+        output_names.data(), output_tensors.data(), 1
+    );
+
+    // Notify finish listeners
+    finish_time = std::chrono::system_clock::now();
+    state = SESSION_STATE_FINISHED;
+
+    for (int i = 0; i < finish_listeners_mutex.size(); i++)
+    {
+        pthread_mutex_lock(finish_listeners_mutex[i]);
+        PRINT_THREAD_SUB("Notifying finish listener: " << i);
+        pthread_cond_signal(finish_listeners_cond[i]);
+        pthread_mutex_unlock(finish_listeners_mutex[i]);
+    }
+
+    PRINT_THREAD_SUB("Inference end: " << instance_name);
+
+    return nullptr;
 }
 
 void InferenceSession::infer_async()
@@ -144,7 +169,7 @@ void InferenceSession::infer_async()
     }
 
     flag_infer = 1;
-    pthread_create(&thread, nullptr, (void* (*)(void*))&InferenceSession::infer_sync, this);
+    pthread_create(&thread, nullptr, (void* (*)(void*))&InferenceSession::infer_async_func, this);
 }
 
 void InferenceSession::wait_infer()
@@ -156,4 +181,98 @@ void InferenceSession::wait_infer()
 
     pthread_join(thread, nullptr);
     flag_infer = 0;
+}
+
+void InferenceSession::add_finish_listener(pthread_mutex_t* mutex, pthread_cond_t* cond)
+{
+    finish_listeners_mutex.push_back(mutex);
+    finish_listeners_cond.push_back(cond);
+}
+
+void InferenceSession::reset_state()
+{
+    finish_time = std::chrono::system_clock::time_point();
+    state = SESSION_STATE_IDLE;
+}
+
+
+void test_single_session(
+    const std::string& model_filepath, const std::string& label_filepath, const std::string& image_filepath,
+    int num_intra_threads, int num_inter_threads,
+    int batch_size, int num_tests
+) {
+    printf(PRT_COLOR_CYAN "Single Session Inference\n" PRT_COLOR_RESET);
+
+    std::string instance_name{"test-single-session"};
+
+    InferenceSession session(instance_name, model_filepath, label_filepath, num_intra_threads, num_inter_threads);
+    session.print_info();
+
+    session.load_input(image_filepath, batch_size);
+
+    std::vector<int64_t> elapsed_times;
+    for (int i = 0; i < num_tests; i++) {
+        auto begin = std::chrono::steady_clock::now();
+
+        session.infer_sync();
+
+        auto end = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+
+        elapsed_times.push_back(elapsed);
+        printf("Elapsed time: %ld ms\n", elapsed);
+
+    }
+    session.print_results();
+
+    float elapsed_single_avg = (float)std::accumulate(elapsed_times.begin(), elapsed_times.end(), 0) / num_tests;
+    std::cout << "Average elapsed time: " << elapsed_single_avg << " ms" << std::endl;
+    std::cout << std::endl;
+}
+
+void test_multi_session(
+    const std::string& model_filepath, const std::string& label_filepath, const std::string& image_filepath,
+    int num_intra_threads, int num_inter_threads, int num_multi_threads,
+    int batch_size, int num_tests
+) {
+    printf(PRT_COLOR_CYAN "Multi Session Inference\n" PRT_COLOR_RESET);
+    printf("<Inference Information>\n");
+    printf(" - Number of sessions: %d\n", num_multi_threads);
+    printf("\n");
+
+    std::string instance_name{"test-multi-session"};
+
+    std::vector<InferenceSession*> sessions;
+    for (int i = 0; i < num_multi_threads; i++) {
+        sessions.push_back(new InferenceSession(instance_name, model_filepath, label_filepath, num_intra_threads, num_inter_threads));
+        sessions[i]->load_input(image_filepath, batch_size);
+    }
+
+    std::vector<int64_t> elapsed_total;
+    for (int i = 0; i < num_tests; i++) {
+        auto begin = std::chrono::steady_clock::now();
+
+        for (int j = 0; j < num_multi_threads; j++) {
+            sessions[j]->infer_async();
+        }
+        for (int j = 0; j < num_multi_threads; j++) {
+            sessions[j]->wait_infer();
+        }
+
+        auto end = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+
+        elapsed_total.push_back(elapsed);
+
+        printf("Elapsed time: %ld ms\n", elapsed_total.back());
+    }
+    sessions[0]->print_results();
+
+    float elapsed_multi_avg = (float)std::accumulate(elapsed_total.begin(), elapsed_total.end(), 0) / num_tests;
+    std::cout << "Average elapsed time: " << elapsed_multi_avg << " ms" << std::endl;
+    std::cout << std::endl;
+
+    for (int i = 0; i < num_multi_threads; i++) {
+        delete sessions[i];
+    }
 }

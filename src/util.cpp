@@ -1,4 +1,4 @@
-#include "utils.hpp"
+#include "util.hpp"
 
 std::ostream& operator<<(std::ostream& os, const ONNXTensorElementDataType& type)
 {
@@ -106,4 +106,14 @@ void print_inference_results(const std::vector<float>& output_tensor_values, con
     std::cout << "Predicted Label ID: " << pred_ids.at(0) << std::endl;
     std::cout << "Predicted Label: " << pred_labels.at(0) << std::endl;
     std::cout << "Uncalibrated Confidence: " << confidences.at(0) << std::endl;
+}
+
+struct timespec timepoint_to_timespec(
+    std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds> tp
+) {
+    auto secs = std::chrono::time_point_cast<std::chrono::seconds>(tp);
+    auto ns = std::chrono::time_point_cast<std::chrono::nanoseconds>(tp) -
+        std::chrono::time_point_cast<std::chrono::nanoseconds>(secs);
+
+    return timespec{secs.time_since_epoch().count(), ns.count()};
 }

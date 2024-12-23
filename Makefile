@@ -1,5 +1,5 @@
 OS=$(shell uname -s)
-DEBUG=1
+DEBUG=0
 
 INCLUDES=$(wildcard include/*.hpp)
 SRC=$(wildcard src/*.cpp)
