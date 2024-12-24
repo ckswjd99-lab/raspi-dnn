@@ -2,6 +2,21 @@
 #include "session.hpp"
 #include "util.hpp"
 
+// output vector
+template <typename T>
+static std::ostream& operator<<(std::ostream& os, const std::vector<T>& v) {
+    os << "[";
+    for (int i = 0; i < v.size(); ++i) {
+        os << v[i];
+        if (i != v.size() - 1) {
+            os << ", ";
+        }
+    }
+    os << "]";
+    return os;
+}
+
+
 InferenceScheduler::InferenceScheduler(const std::string& label_path, int max_threads) {
     this->label_path = label_path;
     this->labels = read_labels(label_path);
@@ -9,15 +24,11 @@ InferenceScheduler::InferenceScheduler(const std::string& label_path, int max_th
     this->max_threads = max_threads;
     this->threads_using = 0;
 
-    any_finished_mutex = PTHREAD_MUTEX_INITIALIZER;
-    any_finished_cond = PTHREAD_COND_INITIALIZER;
+    pthread_mutex_init(&any_finished_mutex, NULL);
+    pthread_cond_init(&any_finished_cond, NULL);
 }
 
-InferenceScheduler::~InferenceScheduler() {
-    for (auto session : sessions) {
-        delete session;
-    }
-}
+InferenceScheduler::~InferenceScheduler() { }
 
 void InferenceScheduler::add_session(
     const std::string& model_path, float weight,
@@ -44,6 +55,9 @@ void InferenceScheduler::load_session_config(const std::string& config_path) {
 
     std::string line;
     while (std::getline(config_file, line)) {
+        if (line[0] == '#' || line.empty())
+            continue;
+
         std::istringstream iss(line);
         std::string model_path;
         float weight;
@@ -51,6 +65,14 @@ void InferenceScheduler::load_session_config(const std::string& config_path) {
         iss >> model_path >> weight >> num_intra_threads >> num_inter_threads;
         add_session(model_path, weight, num_intra_threads, num_inter_threads);
     }
+
+    enqueue_inference_naive();
+
+    PRINT_THREAD_MAIN("Sessions loaded");
+    PRINT_THREAD_MAIN("QUEUE (unready): " << session_unready_queue);
+    PRINT_THREAD_MAIN("QUEUE (ready): " << session_ready_queue);
+    PRINT_THREAD_MAIN("QUEUE (inference): " << session_inference_queue);
+    PRINT_THREAD_MAIN("QUEUE (finished): " << session_finished_queue);
 }
 
 void InferenceScheduler::load_input(const std::string& image_path, int batch_size) {
@@ -67,7 +89,7 @@ void InferenceScheduler::print_results() {
 }
 
 void InferenceScheduler::benchmark(int num_runs, int num_warmup_runs) {
-    PRINT_THREAD_MAIN("Benchmarking sessions");
+    std::cout << "Benchmarking sessions" << std::endl;
 
     for (int snum = 0; snum < sessions.size(); snum++) {
         InferenceSession* session = sessions[snum];
@@ -83,7 +105,7 @@ void InferenceScheduler::benchmark(int num_runs, int num_warmup_runs) {
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
         session_inference_times[snum] = duration / num_runs;
 
-        PRINT_THREAD_MAIN(session->get_instance_name() << " (" << session_inference_times[snum] << " ms)");
+        std::cout << session->get_instance_name() << " (" << session_inference_times[snum] << " ms)" << std::endl;
     }
 }
 
@@ -140,14 +162,19 @@ void InferenceScheduler::infer(std::chrono::_V2::system_clock::time_point deadli
         }
 
         if (flag_start == 1) {
-            PRINT_THREAD_MAIN("Starting session: " << session->get_instance_name());
-
             // start session
             threads_using += session_num_threads;
-            session->infer_async();
+            int ret = session->infer_async();
 
-            session_ready_queue.erase(session_ready_queue.begin());
-            session_inference_queue.push_back(session_idx);
+            if (ret != 0) {
+                PRINT_THREAD_MAIN("Failed to start session: " << session->get_instance_name());
+            }
+            else {
+                PRINT_THREAD_MAIN("Session started: " << session->get_instance_name());
+                session_ready_queue.erase(session_ready_queue.begin());
+                session_inference_queue.push_back(session_idx);
+            }
+
         }
         else {
             if (session != nullptr) {
@@ -164,37 +191,67 @@ void InferenceScheduler::infer(std::chrono::_V2::system_clock::time_point deadli
                 PRINT_THREAD_MAIN("Any session finished");
             }
 
-            // check finished sessions and update threads_using
+            // check lagged sessions and update ready queue
             int session_iter = 0;
+            while (session_unready_queue.size() > 0) {
+                int session_idx = session_unready_queue[session_iter];
+                InferenceSession* session = sessions[session_idx];
+                
+                if (session->get_state() == SESSION_STATE_ZOMBIE) {
+                    PRINT_THREAD_MAIN("Session ready: " << session->get_instance_name());
+
+                    session_unready_queue.erase(session_unready_queue.begin() + session_iter);
+                    session_ready_queue.push_back(session_idx);
+                }
+                else {
+                    session_iter++;
+                }
+
+                if (session_iter >= session_unready_queue.size()) {
+                    break;
+                }
+            }
+
+            // check finished sessions and update threads_using
+            session_iter = 0;
             while (session_inference_queue.size() > 0) {
                 int session_idx = session_inference_queue[session_iter];
                 InferenceSession* session = sessions[session_idx];
+                
                 if (session->get_state() == SESSION_STATE_FINISHED) {
                     auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(session->get_finish_time() - start).count();
                     PRINT_THREAD_MAIN("Session finished: " << session->get_instance_name() << " (" << latency << " ms)");
 
                     threads_using -= session->get_num_intra_threads() * session->get_num_inter_threads();
-                    session_inference_queue.erase(session_inference_queue.begin());
+                    session_inference_queue.erase(session_inference_queue.begin() + session_iter);
                     session_finished_queue.push_back(session_idx);
                 }
                 else {
                     session_iter++;
-                    if (session_iter >= session_inference_queue.size()) {
-                        break;
-                    }
+                }
+
+                if (session_iter >= session_inference_queue.size()) {
+                    break;
                 }
             }
+
+            // sort ready queue by the session index
+            std::sort(session_ready_queue.begin(), session_ready_queue.end());
+
+            PRINT_THREAD_MAIN("After checking sessions");
+            PRINT_THREAD_MAIN("QUEUE (unready): " << session_unready_queue);
+            PRINT_THREAD_MAIN("QUEUE (ready): " << session_ready_queue);
+            PRINT_THREAD_MAIN("QUEUE (inference): " << session_inference_queue);
+            PRINT_THREAD_MAIN("QUEUE (finished): " << session_finished_queue);
 
             // check if timeout
             if (ret == ETIMEDOUT) {
                 PRINT_THREAD_MAIN("Deadline exceeded");
 
-                // kill all alive threads
-                for (auto session_idx : session_inference_queue) {
-                    InferenceSession* session = sessions[session_idx];
-                    pthread_cancel(session->get_thread());
-                }
-
+                break;
+            }
+            else if (ret != 0) {
+                PRINT_THREAD_MAIN("pthread_cond_timedwait() failed");
                 break;
             }
         }
@@ -213,14 +270,26 @@ void InferenceScheduler::infer(std::chrono::_V2::system_clock::time_point deadli
 }
 
 void InferenceScheduler::reset_inference() {
+    pthread_mutex_init(&any_finished_mutex, NULL);
+    pthread_cond_init(&any_finished_cond, NULL);
+
     for (auto session : sessions) {
         session->reset_state();
     }
 
-    session_ready_queue.clear();
+    threads_using = 0;
+
+    session_unready_queue.insert(session_unready_queue.end(), session_inference_queue.begin(), session_inference_queue.end());
     session_inference_queue.clear();
+    session_ready_queue.insert(session_ready_queue.end(), session_finished_queue.begin(), session_finished_queue.end());
     session_finished_queue.clear();
-    enqueue_inference_naive();
+    
+    PRINT_THREAD_MAIN("Inference reset");
+    PRINT_THREAD_MAIN("QUEUE (unready): " << session_unready_queue);
+    PRINT_THREAD_MAIN("QUEUE (ready): " << session_ready_queue);
+    PRINT_THREAD_MAIN("QUEUE (inference): " << session_inference_queue);
+    PRINT_THREAD_MAIN("QUEUE (finished): " << session_finished_queue);
+
 }
 
 void InferenceScheduler::enqueue_inference_naive() {

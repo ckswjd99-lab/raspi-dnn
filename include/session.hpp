@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 #include <chrono>
+#include <atomic>
 
 #include <pthread.h>
 
@@ -11,6 +12,7 @@
 #define SESSION_STATE_IDLE 0
 #define SESSION_STATE_INFER 1
 #define SESSION_STATE_FINISHED 2
+#define SESSION_STATE_ZOMBIE 3
 
 
 class InferenceSession {
@@ -28,7 +30,7 @@ class InferenceSession {
     void print_results();
     
     void infer_sync();
-    void infer_async();
+    int infer_async();
     void wait_infer();
     void add_finish_listener(pthread_mutex_t *mutex, pthread_cond_t *cond);
 
@@ -45,6 +47,7 @@ class InferenceSession {
     pthread_t get_thread() { return thread; }
     int get_state() { return state; }
     std::chrono::system_clock::time_point get_finish_time() { return finish_time; }
+    int get_num_inferenced() { return num_inferenced; }
 
 
     private:
@@ -67,12 +70,14 @@ class InferenceSession {
     std::vector<Ort::AllocatedStringPtr> output_node_name_allocated_strings;
 
     pthread_t thread;
+    pthread_attr_t attr;
     std::vector<pthread_mutex_t *> finish_listeners_mutex;
     std::vector<pthread_cond_t *> finish_listeners_cond;
     std::chrono::system_clock::time_point finish_time;
 
-    int flag_infer = 0;
-    int state = SESSION_STATE_IDLE;
+    int state;
+    std::atomic_int flag_infer;     // indicates real state of inference
+    int num_inferenced = 0;
 
     void* infer_async_func(void* arg);
 

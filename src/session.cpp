@@ -29,6 +29,7 @@ Ort::Session *create_session(const std::string& model_filepath, const std::strin
 {
     Ort::Env env(OrtLoggingLevel::ORT_LOGGING_LEVEL_WARNING, instance_name.c_str());
     Ort::SessionOptions session_options;
+    session_options.SetExecutionMode(ExecutionMode::ORT_PARALLEL);
     session_options.SetIntraOpNumThreads(num_intra_threads);
     session_options.SetInterOpNumThreads(num_inter_threads);
     session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
@@ -44,10 +45,12 @@ InferenceSession::InferenceSession(
 {
     labels = read_labels(label_path);
     session = create_session(model_path, instance_name, num_intra_threads, num_inter_threads);
+    state = SESSION_STATE_IDLE;
+    std::atomic_store(&flag_infer, 0);
 }
 
 InferenceSession::~InferenceSession() {
-    delete session;
+    
 }
 
 void InferenceSession::print_info() {
@@ -120,6 +123,15 @@ void InferenceSession::print_results()
 
 void InferenceSession::infer_sync()
 {
+    // state = SESSION_STATE_INFER;
+    
+    // test and set flag
+    bool ret = std::atomic_exchange(&flag_infer, 1);
+    if (ret) {
+        PRINT_THREAD_MAIN("infer_sync() called while the session is already running.");
+        return;
+    }
+
     state = SESSION_STATE_INFER;
 
     session->Run(
@@ -129,14 +141,18 @@ void InferenceSession::infer_sync()
     );
 
     finish_time = std::chrono::system_clock::now();
+
     state = SESSION_STATE_FINISHED;
+    std::atomic_store(&flag_infer, 0);
 }
 
 void *InferenceSession::infer_async_func(void* arg)
 {
-    PRINT_THREAD_SUB("Inference start: " << instance_name);
+    int inference_id = get_num_inferenced();
 
     state = SESSION_STATE_INFER;
+
+    PRINT_THREAD_SUB("Inference start: " << instance_name);
 
     session->Run(
         Ort::RunOptions{nullptr}, 
@@ -144,43 +160,59 @@ void *InferenceSession::infer_async_func(void* arg)
         output_names.data(), output_tensors.data(), 1
     );
 
-    // Notify finish listeners
     finish_time = std::chrono::system_clock::now();
-    state = SESSION_STATE_FINISHED;
 
+    // Check inference validity
+    if (inference_id != get_num_inferenced())
+    {
+        PRINT_THREAD_SUB("Inference canceled: " << instance_name);
+        
+        state = SESSION_STATE_ZOMBIE;
+        std::atomic_store(&flag_infer, 0);
+        return nullptr;
+    }
+
+    // Notify finish listeners
+    state = SESSION_STATE_FINISHED;
     for (int i = 0; i < finish_listeners_mutex.size(); i++)
     {
         pthread_mutex_lock(finish_listeners_mutex[i]);
-        PRINT_THREAD_SUB("Notifying finish listener: " << i);
+        PRINT_THREAD_SUB("Notifying finish listener: " << instance_name);
         pthread_cond_signal(finish_listeners_cond[i]);
         pthread_mutex_unlock(finish_listeners_mutex[i]);
     }
 
     PRINT_THREAD_SUB("Inference end: " << instance_name);
 
+    std::atomic_store(&flag_infer, 0);
     return nullptr;
 }
 
-void InferenceSession::infer_async()
+int InferenceSession::infer_async()
 {
-    if (flag_infer == 1) {
+    int ret = std::atomic_exchange(&flag_infer, 1);
+    if (ret == 1) {
         PRINT_THREAD_MAIN("infer_async() called while infer_async() is already running.");
-        return;
+        return -1;
     }
 
-    flag_infer = 1;
-    pthread_create(&thread, nullptr, (void* (*)(void*))&InferenceSession::infer_async_func, this);
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+    ret = pthread_create(&thread, &attr, (void* (*)(void*))&InferenceSession::infer_async_func, this);
+
+    return ret;
 }
 
 void InferenceSession::wait_infer()
 {
-    if (flag_infer == 0) {
+    int ret = std::atomic_load(&flag_infer);
+    if (ret == 0) {
         PRINT_THREAD_MAIN("wait_infer() called while infer_async() is not running.");
         return;
     }
 
-    pthread_join(thread, nullptr);
-    flag_infer = 0;
+    while (std::atomic_load(&flag_infer) == 1) { }
 }
 
 void InferenceSession::add_finish_listener(pthread_mutex_t* mutex, pthread_cond_t* cond)
@@ -191,10 +223,10 @@ void InferenceSession::add_finish_listener(pthread_mutex_t* mutex, pthread_cond_
 
 void InferenceSession::reset_state()
 {
+    num_inferenced++;
     finish_time = std::chrono::system_clock::time_point();
     state = SESSION_STATE_IDLE;
 }
-
 
 void test_single_session(
     const std::string& model_filepath, const std::string& label_filepath, const std::string& image_filepath,

@@ -31,6 +31,9 @@ class InferenceScheduler {
     void reset_inference();
     void enqueue_inference_naive();
 
+    // getter functions
+    std::vector<InferenceSession*> get_sessions() { return sessions; }
+
 
     private:
     std::string label_path;
@@ -43,6 +46,7 @@ class InferenceScheduler {
     std::vector<float> session_weights;
     std::vector<int64_t> session_inference_times;
 
+    std::vector<int> session_unready_queue;
     std::vector<int> session_ready_queue;
     std::vector<int> session_inference_queue;
     std::vector<int> session_finished_queue;
