@@ -113,7 +113,11 @@ void InferenceScheduler::infer(int64_t deadline_ts) {
     int64_t start_ts = get_current_time_milliseconds();
 
     while (true) {
-        if (session_ready_queue.empty() && session_inference_queue.empty()) {
+        if (
+            session_unready_queue.empty()
+             && session_ready_queue.empty()
+             && session_inference_queue.empty()
+        ) {
             PRINT_THREAD_MAIN("All sessions finished");
             break;
         }

@@ -39,8 +39,8 @@ int main(int argc, char* argv[])
 
     // Parse arguments
     if (argc > 1) { config_filepath = argv[1]; }
-    if (argc > 2) { deadline_ms = std::stoi(argv[1]); }
-    if (argc > 3) { num_tests = std::stoi(argv[2]); }
+    if (argc > 2) { deadline_ms = std::stoi(argv[2]); }
+    if (argc > 3) { num_tests = std::stoi(argv[3]); }
 
     /* SCHEDULING */
     printf(PRT_COLOR_CYAN "Inference Scheduling\n" PRT_COLOR_RESET);
