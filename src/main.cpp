@@ -42,6 +42,29 @@ int main(int argc, char* argv[])
     if (argc > 2) { deadline_ms = std::stoi(argv[2]); }
     if (argc > 3) { num_tests = std::stoi(argv[3]); }
 
+    // parse config file
+    std::ifstream config_file(config_filepath);
+    if (!config_file.is_open()) {
+        std::cerr << "Failed to open config file: " << config_filepath << std::endl;
+        exit(1);
+    }
+
+    std::string line;
+    while (std::getline(config_file, line)) {
+        if (line.empty() || line[0] != '!')
+            continue;
+
+        std::istringstream iss(line);
+        std::string token;
+        iss >> token;
+        if (token == "!DEADLINE_MS") {
+            iss >> deadline_ms;
+        }
+        else if (token == "!NUM_TESTS") {
+            iss >> num_tests;
+        }
+    }
+
     /* SCHEDULING */
     printf(PRT_COLOR_CYAN "Inference Scheduling\n" PRT_COLOR_RESET);
     printf("<Inference Information>\n");
@@ -71,7 +94,7 @@ int main(int argc, char* argv[])
 
     for (auto elapsed_ms : elapsed_times)
     {
-        printf("Elapsed time: %lld ms\n", elapsed_ms);
+        std::cout << "Elapsed time: " << elapsed_ms << " ms" << std::endl;
     }
 
     return 0;

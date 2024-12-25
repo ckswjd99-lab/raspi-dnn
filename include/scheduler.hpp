@@ -46,6 +46,7 @@ class InferenceScheduler {
     std::vector<InferenceSession*> sessions;
     std::vector<float> session_weights;
     std::vector<int64_t> session_inference_times;
+    float lagging;
 
     std::vector<int> session_unready_queue;
     std::vector<int> session_ready_queue;

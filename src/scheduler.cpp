@@ -23,6 +23,7 @@ InferenceScheduler::InferenceScheduler(const std::string& label_path, int max_th
     
     this->max_threads = max_threads;
     this->threads_using = 0;
+    this->lagging = 1.0;
 
     pthread_mutex_init(&any_finished_mutex, NULL);
     pthread_cond_init(&any_finished_cond, NULL);
@@ -55,7 +56,7 @@ void InferenceScheduler::load_session_config(const std::string& config_path) {
 
     std::string line;
     while (std::getline(config_file, line)) {
-        if (line[0] == '#' || line.empty())
+        if (line.empty() || line[0] == '#' || line[0] == '!')
             continue;
 
         std::istringstream iss(line);
@@ -148,8 +149,8 @@ void InferenceScheduler::infer(int64_t deadline_ts) {
 
             int64_t now_ts = get_current_time_milliseconds();
             int64_t elapsed_ms = now_ts - start_ts;
-            int64_t expected_latency_ms = session_inference_times[session_idx];
-            int64_t expected_end_time_ms = elapsed_ms + expected_latency_ms;
+            float expected_latency_ms = session_inference_times[session_idx] * lagging;
+            float expected_end_time_ms = elapsed_ms + expected_latency_ms;
             PRINT_THREAD_MAIN(
                 "Elapsed " << elapsed_ms << " ms, " << 
                 "Expected latency " << expected_latency_ms << " ms, " <<
@@ -223,6 +224,11 @@ void InferenceScheduler::infer(int64_t deadline_ts) {
                     int64_t latency = finish_time_ts - start_ts;
                     PRINT_THREAD_MAIN("Session finished: " << session->get_instance_name() << " (" << latency << " ms)");
 
+                    // calc lagging
+                    float now_lagging = (float)latency / (float)session_inference_times[session_idx];
+                    float new_lagging = lagging * 0.9 + now_lagging * 0.1;
+                    lagging = new_lagging;
+
                     threads_using -= session->get_num_intra_threads() * session->get_num_inter_threads();
                     session_inference_queue.erase(session_inference_queue.begin() + session_iter);
                     session_finished_queue.push_back(session_idx);
@@ -261,12 +267,12 @@ void InferenceScheduler::infer(int64_t deadline_ts) {
     int64_t end_ts = get_current_time_milliseconds();
     int64_t elapsed_ms = end_ts - start_ts;
     
-    printf("Elapsed time: %lld ms\n", elapsed_ms);
+    std::cout << "Elapsed time: " << elapsed_ms << " ms (lagging: " << lagging << ")" << std::endl;
     printf("Finished sessions:\n");
     for (auto session_idx : session_finished_queue) {
         int64_t finish_time = sessions[session_idx]->get_finish_time();
         int64_t latency = finish_time - start_ts;
-        printf("\t%s (%lld ms)\n", sessions[session_idx]->get_instance_name().c_str(), latency);
+        std::cout << "\t" << sessions[session_idx]->get_instance_name() << " (" << latency << " ms)" << std::endl;
     }
 }
 
@@ -284,6 +290,8 @@ void InferenceScheduler::reset_inference() {
     session_inference_queue.clear();
     session_ready_queue.insert(session_ready_queue.end(), session_finished_queue.begin(), session_finished_queue.end());
     session_finished_queue.clear();
+
+    lagging = 1.0;
     
     PRINT_THREAD_MAIN("Inference reset");
     PRINT_THREAD_MAIN("QUEUE (unready): " << session_unready_queue);

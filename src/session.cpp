@@ -129,8 +129,6 @@ void InferenceSession::session_run()
 
 void InferenceSession::infer_sync()
 {
-    // state = SESSION_STATE_INFER;
-    
     // test and set flag
     bool ret = std::atomic_exchange(&flag_infer, 1);
     if (ret) {
@@ -261,7 +259,7 @@ void test_single_session(
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
 
         elapsed_times.push_back(elapsed);
-        printf("Elapsed time: %lld ms\n", elapsed);
+        std::cout << "Elapsed time: " << elapsed << " ms" << std::endl;
 
     }
     session.print_results();
@@ -305,7 +303,7 @@ void test_multi_session(
 
         elapsed_total.push_back(elapsed);
 
-        printf("Elapsed time: %lld ms\n", elapsed_total.back());
+        std::cout << "Elapsed time: " << elapsed_total.back() << " ms" << std::endl;
     }
     sessions[0]->print_results();
 
