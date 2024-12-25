@@ -109,11 +109,8 @@ void InferenceScheduler::benchmark(int num_runs, int num_warmup_runs) {
     }
 }
 
-void InferenceScheduler::infer(std::chrono::_V2::system_clock::time_point deadline) {
-    auto start = std::chrono::system_clock::now();
-    int64_t start_ms = start.time_since_epoch().count() / 1000000;
-    // not duration, a time point
-    int64_t deadline_ms = deadline.time_since_epoch().count() / 1000000;
+void InferenceScheduler::infer(int64_t deadline_ts) {
+    int64_t start_ts = get_current_time_milliseconds();
 
     while (true) {
         if (session_ready_queue.empty() && session_inference_queue.empty()) {
@@ -145,9 +142,8 @@ void InferenceScheduler::infer(std::chrono::_V2::system_clock::time_point deadli
                 flag_start = 0;
             }
 
-            auto now = std::chrono::system_clock::now();
-            int64_t now_ms = now.time_since_epoch().count() / 1000000;
-            int64_t elapsed_ms = now_ms - start_ms;
+            int64_t now_ts = get_current_time_milliseconds();
+            int64_t elapsed_ms = now_ts - start_ts;
             int64_t expected_latency_ms = session_inference_times[session_idx];
             int64_t expected_end_time_ms = elapsed_ms + expected_latency_ms;
             PRINT_THREAD_MAIN(
@@ -155,8 +151,8 @@ void InferenceScheduler::infer(std::chrono::_V2::system_clock::time_point deadli
                 "Expected latency " << expected_latency_ms << " ms, " <<
                 "Expected end time " << (elapsed_ms + expected_latency_ms) << " ms"
             );
-            if (expected_end_time_ms > deadline_ms - start_ms) {
-                PRINT_THREAD_MAIN("May exceed deadline: " << expected_end_time_ms << " > " << deadline_ms - start_ms);
+            if (expected_end_time_ms > deadline_ts - start_ts) {
+                PRINT_THREAD_MAIN("May exceed deadline: " << expected_end_time_ms << " > " << deadline_ts - start_ts);
                 flag_start = 0;
             }
         }
@@ -183,7 +179,7 @@ void InferenceScheduler::infer(std::chrono::_V2::system_clock::time_point deadli
 
             // wait for any session to finish
             pthread_mutex_lock(&any_finished_mutex);
-            struct timespec deadline_as_timespec = timepoint_to_timespec(deadline);
+            struct timespec deadline_as_timespec = timepoint_to_timespec(deadline_ts);
             int ret = pthread_cond_timedwait(&any_finished_cond, &any_finished_mutex, &deadline_as_timespec);
             pthread_mutex_unlock(&any_finished_mutex);
             
@@ -219,7 +215,8 @@ void InferenceScheduler::infer(std::chrono::_V2::system_clock::time_point deadli
                 InferenceSession* session = sessions[session_idx];
                 
                 if (session->get_state() == SESSION_STATE_FINISHED) {
-                    auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(session->get_finish_time() - start).count();
+                    int64_t finish_time_ts = session->get_finish_time();
+                    int64_t latency = finish_time_ts - start_ts;
                     PRINT_THREAD_MAIN("Session finished: " << session->get_instance_name() << " (" << latency << " ms)");
 
                     threads_using -= session->get_num_intra_threads() * session->get_num_inter_threads();
@@ -257,15 +254,15 @@ void InferenceScheduler::infer(std::chrono::_V2::system_clock::time_point deadli
         }
     }
 
-    auto end = std::chrono::system_clock::now();
-    int64_t elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    int64_t end_ts = get_current_time_milliseconds();
+    int64_t elapsed_ms = end_ts - start_ts;
     
-    printf("Elapsed time: %ld ms\n", elapsed);
+    printf("Elapsed time: %lld ms\n", elapsed_ms);
     printf("Finished sessions:\n");
     for (auto session_idx : session_finished_queue) {
-        auto finish_time = sessions[session_idx]->get_finish_time();
-        int64_t latency = std::chrono::duration_cast<std::chrono::milliseconds>(finish_time - start).count();
-        printf("\t%s (%ld ms)\n", sessions[session_idx]->get_instance_name().c_str(), latency);
+        int64_t finish_time = sessions[session_idx]->get_finish_time();
+        int64_t latency = finish_time - start_ts;
+        printf("\t%s (%lld ms)\n", sessions[session_idx]->get_instance_name().c_str(), latency);
     }
 }
 

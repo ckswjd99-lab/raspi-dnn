@@ -28,11 +28,14 @@ class InferenceSession {
 
     void load_input(const std::string& image_path, int batch_size);
     void print_results();
+
+    void session_run();
     
     void infer_sync();
     int infer_async();
     void wait_infer();
     void add_finish_listener(pthread_mutex_t *mutex, pthread_cond_t *cond);
+    void notify_finish_listeners();
 
     void reset_state();
 
@@ -46,8 +49,13 @@ class InferenceSession {
     int get_num_inter_threads() { return num_inter_threads; }
     pthread_t get_thread() { return thread; }
     int get_state() { return state; }
-    std::chrono::system_clock::time_point get_finish_time() { return finish_time; }
+    int64_t get_finish_time() { return finish_time_ts; }
     int get_num_inferenced() { return num_inferenced; }
+
+    // setter functions
+    void set_state(int state) { this->state = state; }
+    void set_flag_infer(int flag_value) { atomic_store(&flag_infer, flag_value); }
+    void set_finish_time(int64_t finish_time) { this->finish_time_ts = finish_time; }
 
 
     private:
@@ -73,13 +81,11 @@ class InferenceSession {
     pthread_attr_t attr;
     std::vector<pthread_mutex_t *> finish_listeners_mutex;
     std::vector<pthread_cond_t *> finish_listeners_cond;
-    std::chrono::system_clock::time_point finish_time;
+    int64_t finish_time_ts;
 
     int state;
     std::atomic_int flag_infer;     // indicates real state of inference
     int num_inferenced = 0;
-
-    void* infer_async_func(void* arg);
 
 };
 

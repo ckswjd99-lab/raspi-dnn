@@ -26,7 +26,8 @@ class InferenceScheduler {
     void print_results();
 
     void benchmark(int num_runs, int num_warmup_runs);
-    void infer(std::chrono::_V2::system_clock::time_point deadline);
+    // void infer(std::chrono::_V2::system_clock::time_point deadline);
+    void infer(int64_t deadline);
 
     void reset_inference();
     void enqueue_inference_naive();

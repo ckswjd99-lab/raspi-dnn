@@ -38,8 +38,9 @@ int main(int argc, char* argv[])
     const int64_t batch_size = 1;
 
     // Parse arguments
-    if (argc > 1) { deadline_ms = std::stoi(argv[1]); }
-    if (argc > 2) { num_tests = std::stoi(argv[2]); }
+    if (argc > 1) { config_filepath = argv[1]; }
+    if (argc > 2) { deadline_ms = std::stoi(argv[1]); }
+    if (argc > 3) { num_tests = std::stoi(argv[2]); }
 
     /* SCHEDULING */
     printf(PRT_COLOR_CYAN "Inference Scheduling\n" PRT_COLOR_RESET);
@@ -62,7 +63,7 @@ int main(int argc, char* argv[])
         auto target_time = start + std::chrono::milliseconds(deadline_ms * i);
         std::this_thread::sleep_until(target_time);
 
-        scheduler.infer(std::chrono::system_clock::now() + std::chrono::milliseconds(deadline_ms));
+        scheduler.infer(get_current_time_milliseconds() + deadline_ms);
 
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - start).count();
         elapsed_times.push_back(elapsed);
@@ -70,7 +71,7 @@ int main(int argc, char* argv[])
 
     for (auto elapsed_ms : elapsed_times)
     {
-        printf("Elapsed time: %ld ms\n", elapsed_ms);
+        printf("Elapsed time: %lld ms\n", elapsed_ms);
     }
 
     return 0;

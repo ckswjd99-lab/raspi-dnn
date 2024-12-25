@@ -21,7 +21,7 @@ else
 	LDFLAGS=-L/usr/local/lib
 	COMMON+=-I/usr/local/include
 endif
-LDFLAGS+=-lonnxruntime -lpthread -fopenmp
+LDFLAGS+=-lonnxruntime -lpthread
 LDFLAGS+=-lopencv_core -lopencv_imgproc -lopencv_imgcodecs -lopencv_dnn
 
 ifeq ($(DEBUG),1)

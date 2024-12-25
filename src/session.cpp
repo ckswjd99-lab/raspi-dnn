@@ -121,6 +121,12 @@ void InferenceSession::print_results()
     print_inference_results(output_tensor_values, labels, 1);
 }
 
+void InferenceSession::session_run()
+{
+    Ort::RunOptions run_options{nullptr};
+    session->Run(run_options, input_names.data(), input_tensors.data(), 1, output_names.data(), output_tensors.data(), 1);
+}
+
 void InferenceSession::infer_sync()
 {
     // state = SESSION_STATE_INFER;
@@ -140,51 +146,43 @@ void InferenceSession::infer_sync()
         output_names.data(), output_tensors.data(), 1
     );
 
-    finish_time = std::chrono::system_clock::now();
+    finish_time_ts = get_current_time_milliseconds();
 
     state = SESSION_STATE_FINISHED;
     std::atomic_store(&flag_infer, 0);
 }
 
-void *InferenceSession::infer_async_func(void* arg)
+void *infer_async_func(void* arg)
 {
-    int inference_id = get_num_inferenced();
+    InferenceSession* session = (InferenceSession*)arg;
 
-    state = SESSION_STATE_INFER;
+    int inference_id = session->get_num_inferenced();
+    session->set_state(SESSION_STATE_INFER);
 
-    PRINT_THREAD_SUB("Inference start: " << instance_name);
+    PRINT_THREAD_SUB("Inference start: " << session->get_instance_name());
 
-    session->Run(
-        Ort::RunOptions{nullptr}, 
-        input_names.data(), input_tensors.data(), 1, 
-        output_names.data(), output_tensors.data(), 1
-    );
+    session->session_run();
 
-    finish_time = std::chrono::system_clock::now();
+    int64_t finish_time_ts = get_current_time_milliseconds();
+    session->set_finish_time(finish_time_ts);
 
     // Check inference validity
-    if (inference_id != get_num_inferenced())
+    if (inference_id != session->get_num_inferenced())
     {
-        PRINT_THREAD_SUB("Inference canceled: " << instance_name);
+        PRINT_THREAD_SUB("Inference canceled: " << session->get_instance_name());
         
-        state = SESSION_STATE_ZOMBIE;
-        std::atomic_store(&flag_infer, 0);
+        session->set_state(SESSION_STATE_ZOMBIE);
+        session->set_flag_infer(0);
         return nullptr;
     }
 
     // Notify finish listeners
-    state = SESSION_STATE_FINISHED;
-    for (int i = 0; i < finish_listeners_mutex.size(); i++)
-    {
-        pthread_mutex_lock(finish_listeners_mutex[i]);
-        PRINT_THREAD_SUB("Notifying finish listener: " << instance_name);
-        pthread_cond_signal(finish_listeners_cond[i]);
-        pthread_mutex_unlock(finish_listeners_mutex[i]);
-    }
+    session->set_state(SESSION_STATE_FINISHED);
+    session->notify_finish_listeners();
 
-    PRINT_THREAD_SUB("Inference end: " << instance_name);
+    PRINT_THREAD_SUB("Inference end: " << session->get_instance_name());
 
-    std::atomic_store(&flag_infer, 0);
+    session->set_flag_infer(0);
     return nullptr;
 }
 
@@ -199,7 +197,7 @@ int InferenceSession::infer_async()
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
-    ret = pthread_create(&thread, &attr, (void* (*)(void*))&InferenceSession::infer_async_func, this);
+    ret = pthread_create(&thread, &attr, (void* (*)(void*))&infer_async_func, this);
 
     return ret;
 }
@@ -221,10 +219,21 @@ void InferenceSession::add_finish_listener(pthread_mutex_t* mutex, pthread_cond_
     finish_listeners_cond.push_back(cond);
 }
 
+void InferenceSession::notify_finish_listeners()
+{
+    for (int i = 0; i < finish_listeners_mutex.size(); i++)
+    {
+        pthread_mutex_lock(finish_listeners_mutex[i]);
+        PRINT_THREAD_SUB("Notifying finish listener: " << instance_name);
+        pthread_cond_signal(finish_listeners_cond[i]);
+        pthread_mutex_unlock(finish_listeners_mutex[i]);
+    }
+}
+
 void InferenceSession::reset_state()
 {
     num_inferenced++;
-    finish_time = std::chrono::system_clock::time_point();
+    finish_time_ts = get_current_time_milliseconds();
     state = SESSION_STATE_IDLE;
 }
 
@@ -252,7 +261,7 @@ void test_single_session(
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
 
         elapsed_times.push_back(elapsed);
-        printf("Elapsed time: %ld ms\n", elapsed);
+        printf("Elapsed time: %lld ms\n", elapsed);
 
     }
     session.print_results();
@@ -296,7 +305,7 @@ void test_multi_session(
 
         elapsed_total.push_back(elapsed);
 
-        printf("Elapsed time: %ld ms\n", elapsed_total.back());
+        printf("Elapsed time: %lld ms\n", elapsed_total.back());
     }
     sessions[0]->print_results();
 
